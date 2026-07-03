@@ -83,7 +83,8 @@ def _build_html(
         link = j.get("link", "")
         apply_cell = (
             "<span class='muted'>Applied</span>" if applied
-            else f"<a class='apply' href='{escape(link)}' target='_blank'>Apply</a>" if link
+            else f"<a class='apply' href='{escape(link)}' data-id='{escape(j.get('id', ''))}' "
+                 f"data-title='{escape(j['title'])}' target='_blank'>Apply</a>" if link
             else "<span class='muted'>—</span>"
         )
         job_rows.append(
@@ -186,6 +187,43 @@ tr.done td {{ opacity: .45; }}
     <tbody>{job_rows}</tbody>
   </table>
 </div>
+<script>
+// remember which Apply links were clicked; ask about them on revisit
+const KEY = 'pendingApply';
+const load = () => JSON.parse(localStorage.getItem(KEY) || '{{}}');
+const save = p => localStorage.setItem(KEY, JSON.stringify(p));
+
+document.querySelectorAll('a.apply').forEach(a =>
+  a.addEventListener('click', () => {{
+    const p = load();
+    p[a.dataset.id] = a.dataset.title;
+    save(p);
+  }})
+);
+
+let asking = false;
+async function askPending() {{
+  if (asking) return;
+  asking = true;
+  const p = load();
+  for (const [id, title] of Object.entries(p)) {{
+    const yes = confirm('Did you apply to:\\n\\n' + title + '?');
+    delete p[id];
+    save(p);
+    if (yes) {{
+      await fetch('/applied/' + encodeURIComponent(id), {{method: 'POST'}});
+      location.reload();
+      return;
+    }}
+  }}
+  asking = false;
+}}
+
+window.addEventListener('load', askPending);
+document.addEventListener('visibilitychange', () => {{
+  if (!document.hidden) askPending();
+}});
+</script>
 </body>
 </html>"""
 

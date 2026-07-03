@@ -20,6 +20,8 @@ JOBS_FIELDS = [
     "link", "published", "applied", "summary",
 ]
 
+APPLIED_FIELDS = ["job_id", "title", "company", "date_applied", "result", "notes"]
+
 PREP_FIELDS = [
     "job_id", "title", "company", "link",
     "tailored_bullets", "missing_keywords", "cover_snippet",
@@ -52,6 +54,33 @@ def add_jobs(jobs: list[dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=JOBS_FIELDS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def mark_applied(job_id: str) -> bool:
+    """Flag a job as applied in jobs_found.csv and log it to jobs_applied.csv."""
+    jobs = load_jobs()
+    job = next((j for j in jobs if j.get("id") == job_id), None)
+    if job is None:
+        return False
+    job["applied"] = "yes"
+    with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=JOBS_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(jobs)
+    apps = load_applications()
+    apps.append({
+        "job_id": job_id,
+        "title": job.get("title", ""),
+        "company": job.get("company", ""),
+        "date_applied": datetime.now(timezone.utc).strftime(DATE_FMT),
+        "result": "Applied",
+        "notes": "",
+    })
+    with open(APPLIED_PATH, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=APPLIED_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(apps)
+    return True
 
 
 def save_prep_results(rows: list[dict]) -> None:

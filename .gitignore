@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 *.pyo
 application_prep.csv
+master_resume.txt
+jobs_found.csv
+jobs_applied.csv
 *.env
 logs/
 *.bak
