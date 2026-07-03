@@ -9,7 +9,7 @@ Usage:
 import argparse
 import webbrowser
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 
@@ -17,74 +17,174 @@ import store
 
 DASHBOARD_PATH = Path("dashboard.html")
 
+# ---- points system (from resume: DA/AE profile, remote-first) ----
+# title: Data Analyst ranks highest, other target roles below
+TITLE_POINTS = [
+    ("data analyst", 30),
+    ("business analyst", 20),
+    ("analytics engineer", 20),
+]
+# location: remote first, then India
+LOCATION_POINTS = [
+    ("remote", 20), ("work from anywhere", 20), ("anywhere", 20),
+    ("india", 10),
+]
+# skills pulled from resume — +5 each, found in title or summary
+SKILL_KEYWORDS = [
+    "sql", "python", "power bi", "tableau", "excel",
+    "etl", "dax", "power query", "pandas",
+]
+SKILL_POINT, SKILL_CAP = 5, 25
+
+
+def score_job(job: dict) -> int:
+    title = job.get("title", "").lower()
+    haystack = title + " " + job.get("summary", "").lower() + " " + job.get("location", "").lower()
+    pts = 0
+    for kw, p in TITLE_POINTS:
+        if kw in title:
+            pts += p
+            break
+    for kw, p in LOCATION_POINTS:
+        if kw in haystack:
+            pts += p
+            break
+    pts += min(SKILL_CAP, sum(SKILL_POINT for kw in SKILL_KEYWORDS if kw in haystack))
+    # freshness dominates: apply fast while postings are new
+    age = datetime.now(timezone.utc) - store._parse(job.get("published", ""), store.UTC_FMT)
+    if age.days <= 1:
+        pts += 50
+    elif age.days <= 3:
+        pts += 40
+    elif age.days <= 7:
+        pts += 25
+    elif age.days <= 14:
+        pts += 10
+    return pts
+
 
 def _build_html(
     total_jobs: int,
     jobs_week: int,
     feed_breakdown: list[tuple[str, int]],
-    recent_jobs: list[dict],
+    ranked_jobs: list[dict],
     total_apps: int,
     apps_week: int,
 ) -> str:
     # escape at the render boundary — feed data is untrusted
     feed_rows = "".join(
-        f"<tr><td class='px-4 py-2'>{escape(label)}</td>"
-        f"<td class='px-4 py-2 text-right'>{count}</td></tr>"
+        f"<tr><td>{escape(label)}</td>"
+        f"<td class='num'>{count}</td></tr>"
         for label, count in feed_breakdown
     )
-    job_rows = "".join(
-        f"<tr><td class='px-4 py-2'>{escape(j['title'])}</td>"
-        f"<td class='px-4 py-2'>{escape(j.get('company', ''))}</td>"
-        f"<td class='px-4 py-2'>{escape(j.get('source', ''))}</td>"
-        f"<td class='px-4 py-2 text-sm text-slate-500'>{escape(j.get('published', ''))}</td></tr>"
-        for j in recent_jobs
-    )
+    job_rows = []
+    for j in ranked_jobs:
+        applied = j.get("applied", "").strip().lower() in ("yes", "true", "1") or j.get("applied", "").strip()
+        link = j.get("link", "")
+        apply_cell = (
+            "<span class='muted'>Applied</span>" if applied
+            else f"<a class='apply' href='{escape(link)}' target='_blank'>Apply</a>" if link
+            else "<span class='muted'>—</span>"
+        )
+        job_rows.append(
+            f"<tr{' class=done' if applied else ''}>"
+            f"<td class='num'>{j['_score']}</td>"
+            f"<td>{escape(j['title'])}</td>"
+            f"<td>{escape(j.get('source', ''))}</td>"
+            f"<td class='muted'>{escape(j.get('published', ''))}</td>"
+            f"<td>{apply_cell}</td></tr>"
+        )
+    job_rows = "".join(job_rows)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Job Tracker Dashboard</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<style>
+/* coffee palette: espresso text, mocha accent, caramel highlight, latte muted, cream bg */
+:root {{
+  --espresso: #3b2a20;
+  --mocha: #6f4e37;
+  --caramel: #b57b3f;
+  --latte: #9c8672;
+  --cream: #f6f0e7;
+  --card: #fffbf4;
+  --line: #e7dccb;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0 auto; padding: 2.5rem 1.5rem; max-width: 64rem;
+  background: var(--cream); color: var(--espresso);
+  font: 15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+}}
+h1 {{ margin: 0 0 .25rem; font-size: 1.6rem; font-weight: 600; color: var(--mocha); }}
+h2 {{ margin: 0 0 .75rem; font-size: 1.05rem; font-weight: 600; color: var(--mocha); }}
+.muted {{ color: var(--latte); font-size: .85rem; }}
+.stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin: 1.75rem 0; }}
+.card {{
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: .75rem; padding: 1rem 1.25rem;
+}}
+.stat-label {{ margin: 0; font-size: .8rem; color: var(--latte); }}
+.stat-value {{ margin: .2rem 0 0; font-size: 2rem; font-weight: 700; color: var(--mocha); }}
+.stat-value.accent {{ color: var(--caramel); }}
+.panels {{ display: grid; grid-template-columns: 1fr; gap: 1.25rem; }}
+@media (min-width: 768px) {{ .panels {{ grid-template-columns: 1fr 1fr; }} }}
+table {{ width: 100%; border-collapse: collapse; font-size: .875rem; }}
+th, td {{ padding: .5rem .6rem; text-align: left; border-bottom: 1px solid var(--line); }}
+th {{ color: var(--latte); font-weight: 500; }}
+tr:last-child td {{ border-bottom: none; }}
+td.num, th.num {{ text-align: right; color: var(--caramel); font-weight: 600; }}
+a.apply {{
+  display: inline-block; padding: .2rem .7rem; border-radius: .5rem;
+  background: var(--mocha); color: var(--cream); text-decoration: none;
+  font-size: .8rem; font-weight: 600;
+}}
+a.apply:hover {{ background: var(--caramel); }}
+tr.done td {{ opacity: .45; }}
+</style>
 </head>
-<body class="bg-slate-50 p-6 max-w-5xl mx-auto">
-<h1 class="text-3xl font-bold text-slate-800 mb-6">Job Tracker Dashboard</h1>
-<p class="text-slate-500 mb-6">Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+<body>
+<h1>Job Tracker Dashboard</h1>
+<p class="muted">Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
 
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-  <div class="bg-white rounded-xl shadow p-4">
-    <p class="text-sm text-slate-500">Total Jobs</p>
-    <p class="text-3xl font-bold text-indigo-600">{total_jobs}</p>
+<div class="stats">
+  <div class="card">
+    <p class="stat-label">Total Jobs</p>
+    <p class="stat-value">{total_jobs}</p>
   </div>
-  <div class="bg-white rounded-xl shadow p-4">
-    <p class="text-sm text-slate-500">Jobs This Week</p>
-    <p class="text-3xl font-bold text-emerald-600">{jobs_week}</p>
+  <div class="card">
+    <p class="stat-label">Jobs This Week</p>
+    <p class="stat-value accent">{jobs_week}</p>
   </div>
-  <div class="bg-white rounded-xl shadow p-4">
-    <p class="text-sm text-slate-500">Applications</p>
-    <p class="text-3xl font-bold text-indigo-600">{total_apps}</p>
+  <div class="card">
+    <p class="stat-label">Applications</p>
+    <p class="stat-value">{total_apps}</p>
   </div>
-  <div class="bg-white rounded-xl shadow p-4">
-    <p class="text-sm text-slate-500">Applied This Week</p>
-    <p class="text-3xl font-bold text-emerald-600">{apps_week}</p>
+  <div class="card">
+    <p class="stat-label">Applied This Week</p>
+    <p class="stat-value accent">{apps_week}</p>
   </div>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-  <div class="bg-white rounded-xl shadow p-4">
-    <h2 class="text-lg font-semibold text-slate-700 mb-3">Jobs by Feed</h2>
-    <table class="w-full text-sm">
-      <thead><tr class="border-b text-slate-500"><th class="text-left px-4 py-2">Feed</th><th class="text-right px-4 py-2">Count</th></tr></thead>
+<div class="panels">
+  <div class="card">
+    <h2>Jobs by Feed</h2>
+    <table>
+      <thead><tr><th>Feed</th><th class="num">Count</th></tr></thead>
       <tbody>{feed_rows}</tbody>
     </table>
   </div>
-  <div class="bg-white rounded-xl shadow p-4">
-    <h2 class="text-lg font-semibold text-slate-700 mb-3">Recent Jobs</h2>
-    <table class="w-full text-sm">
-      <thead><tr class="border-b text-slate-500"><th class="text-left px-4 py-2">Title</th><th class="text-left px-4 py-2">Company</th><th class="text-left px-4 py-2">Source</th><th class="text-left px-4 py-2">Published</th></tr></thead>
-      <tbody>{job_rows}</tbody>
-    </table>
-  </div>
+</div>
+
+<div class="card" style="margin-top:1.25rem">
+  <h2>All Jobs — Ranked</h2>
+  <p class="muted" style="margin:0 0 .75rem">Points: freshness (≤1d 50 / ≤3d 40 / ≤7d 25 / ≤14d 10) + title match (DA 30 / BA·AE 20) + remote 20 / India 10 + resume skills (5 each, max 25)</p>
+  <table>
+    <thead><tr><th class="num">Score</th><th>Title</th><th>Source</th><th>Published</th><th>Apply</th></tr></thead>
+    <tbody>{job_rows}</tbody>
+  </table>
 </div>
 </body>
 </html>"""
@@ -99,13 +199,17 @@ def main(open_browser: bool = False) -> None:
 
     feed_breakdown = Counter(j.get("source", "Unknown") for j in jobs).most_common()
 
-    recent = sorted(jobs, key=lambda j: j.get("published", ""), reverse=True)[:20]
+    for j in jobs:
+        j["_score"] = score_job(j)
+    # newest first, then stable-sort by score so ties stay newest-first
+    jobs.sort(key=lambda j: j.get("published", ""), reverse=True)
+    ranked = sorted(jobs, key=lambda j: -j["_score"])
 
     html = _build_html(
         total_jobs=len(jobs),
         jobs_week=len(jobs_week),
         feed_breakdown=feed_breakdown,
-        recent_jobs=recent,
+        ranked_jobs=ranked,
         total_apps=len(apps),
         apps_week=len(apps_week),
     )
