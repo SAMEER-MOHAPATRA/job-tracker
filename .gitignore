@@ -3,3 +3,8 @@ __pycache__/
 *.pyo
 application_prep.csv
 *.env
+logs/
+*.bak
+jobs_archive.csv
+jobs_found.json
+dashboard.html

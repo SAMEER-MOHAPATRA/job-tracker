@@ -1,0 +1,22 @@
+# job_tracker — Domain Glossary
+
+## Domain
+
+**Discovery** — RSS feed ingestion, relevance filtering, and deduplication of job listings. Produces `Job` records. Entry point: `discover.py` (`--check` for feed health).
+
+**Preparation** — Cover-letter tailoring for a `Job` by extracting keywords from its description and matching them against a bullet library. Produces `PrepResult` records. Entry point: `prep.py`.
+
+**Tracking** — Logging applications and generating weekly reviews. Produces `Application` records. Entry point: `review.py`.
+
+**Dashboard** — Read-only HTML report aggregating `Job` and `Application` data. Entry point: `dashboard.py`.
+
+## Core entities
+
+- **Job** — A discovered listing with fields: id, title, company, location, source, link, published, applied, summary.
+- **Application** — A job the user applied to with fields: job_id, title, company, date_applied, result, notes.
+- **PrepResult** — Tailored cover-letter materials with fields: job_id, title, company, link, tailored_bullets, missing_keywords, cover_snippet.
+
+## Architecture
+
+- **store.py** — plain module functions (`load_jobs`, `add_jobs`, `load_applications`, `save_prep_results`, `this_week`) that own the CSV schemas and date formats. All feed-derived text is sanitized to plain text before storage; `dashboard.py` additionally HTML-escapes at render.
+- **config.toml + config.py** — All configuration (feeds, keywords, bullet map, cover template) in `config.toml`. `config.py` loads it once at import and exports typed constants. `KEYWORD_PATTERN` is generated from `BULLET_MAP` keys to prevent drift.

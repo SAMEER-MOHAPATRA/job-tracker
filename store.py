@@ -1,0 +1,74 @@
+import csv
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+# ponytail: every script imports store — fix Windows cp1252 console once here
+for _stream in (sys.stdout, sys.stderr):
+    if _stream and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+CSV_PATH = Path("jobs_found.csv")
+APPLIED_PATH = Path("jobs_applied.csv")
+PREP_PATH = Path("application_prep.csv")
+
+UTC_FMT = "%Y-%m-%d %H:%M UTC"
+DATE_FMT = "%Y-%m-%d"
+
+JOBS_FIELDS = [
+    "id", "title", "company", "location", "source",
+    "link", "published", "applied", "summary",
+]
+
+PREP_FIELDS = [
+    "job_id", "title", "company", "link",
+    "tailored_bullets", "missing_keywords", "cover_snippet",
+]
+
+
+def _load(path: Path) -> list[dict]:
+    try:
+        # utf-8-sig: hand-edited CSVs (Excel) often carry a BOM that would
+        # otherwise corrupt the first fieldname
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return list(csv.DictReader(f))
+    except FileNotFoundError:
+        return []
+
+
+def load_jobs() -> list[dict]:
+    return _load(CSV_PATH)
+
+
+def load_applications() -> list[dict]:
+    return _load(APPLIED_PATH)
+
+
+def add_jobs(jobs: list[dict]) -> None:
+    # ponytail: rewrite the whole file so the header always matches
+    # JOBS_FIELDS — appending under a stale header silently misaligns columns
+    rows = load_jobs() + jobs
+    with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=JOBS_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def save_prep_results(rows: list[dict]) -> None:
+    with open(PREP_PATH, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PREP_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def this_week(rows: list[dict], key: str, fmt: str = DATE_FMT, days: int = 7) -> list[dict]:
+    """Filter already-loaded rows to those dated within the last `days`."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return [r for r in rows if _parse(r.get(key, ""), fmt) > cutoff]
+
+
+def _parse(date_str: str, fmt: str) -> datetime:
+    try:
+        return datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return datetime.min.replace(tzinfo=timezone.utc)

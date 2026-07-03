@@ -1,0 +1,50 @@
+name: Daily Job Discovery
+
+on:
+  schedule:
+    # Run at 00:00 UTC every day
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write  # To commit jobs_found.csv
+  issues: write    # To comment on the issue
+
+jobs:
+  discover-jobs:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        
+      - name: Run Job Discovery
+        run: python discover.py --days 7
+        
+      - name: Commit updated CSV
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jobs_found.csv
+          git commit -m "chore: update jobs_found.csv" || echo "No changes to commit"
+          git push
+          
+      - name: Post summary to GitHub Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ vars.ISSUE_NUMBER }}
+        run: |
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "ISSUE_NUMBER variable is not set. Please set the ISSUE_NUMBER repository variable."
+            exit 0
+          fi
+          gh issue comment $ISSUE_NUMBER --body-file logs/last_run_summary.txt
