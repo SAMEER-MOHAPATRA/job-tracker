@@ -67,6 +67,16 @@ url = "https://news.google.com/rss/search?q=site%3Alinkedin.com%2Fjobs+%22data+a
 label = "LinkedIn | Analytics Eng"
 url = "https://news.google.com/rss/search?q=site%3Alinkedin.com%2Fjobs+%22analytics+engineer%22&hl=en-IN&gl=IN&ceid=IN:en"
 
+[[discovery.feeds]]
+label = "WWR | Mgmt & Finance"
+url = "https://weworkremotely.com/categories/remote-management-and-finance-jobs.rss"
+
+# Remotive: .com is Cloudflare-walled and category filtering is ignored;
+# .io mirror serves the general feed, which discover.py filters by role keywords anyway.
+[[discovery.feeds]]
+label = "Remotive | Remote"
+url = "https://remotive.io/remote-jobs/feed"
+
 [preparation]
 # the cover template has exactly as many bullet slots as there are defaults
 defaults = [

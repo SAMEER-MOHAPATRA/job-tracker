@@ -15,8 +15,6 @@ import logging
 import re
 import socket
 import sys
-import time
-import urllib.error
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from pathlib import Path
@@ -31,8 +29,6 @@ from config import FEEDS, MAX_PER_FEED, ROLE_KEYWORDS, SENIORITY_BLOCK
 # ─── Configuration ───────────────────────────────────────────────────────
 
 DEFAULT_DAYS = 7
-MAX_RETRIES = 3
-RETRY_BACKOFF = 2  # seconds, multiplied by attempt number
 
 # ponytail: 8s socket timeout prevents feedparser from hanging on dead hosts
 socket.setdefaulttimeout(8)
@@ -42,8 +38,6 @@ SUMMARY_PATH = Path("logs/last_run_summary.txt")
 log = logging.getLogger("discover")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
-
-_TRANSIENT_ERRORS = (socket.timeout, TimeoutError, ConnectionError, urllib.error.URLError)
 
 
 def sanitize_html(text: str) -> str:
@@ -57,19 +51,13 @@ def sanitize_html(text: str) -> str:
 
 
 def setup_logging(verbose: bool = False) -> None:
-    """Configure file + console logging."""
     # Windows cp1252 console fix lives in store.py (imported by all scripts)
-    level = logging.DEBUG if verbose else logging.INFO
-    fmt = "%(asctime)s | %(levelname)-7s | %(message)s"
-
-    handlers: list[logging.Handler] = [logging.StreamHandler(stream=sys.stdout)]
-
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / f"discovery_{datetime.now().strftime('%Y-%m-%d')}.log"
-    handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
-
-    logging.basicConfig(level=level, format=fmt, handlers=handlers, force=True)
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s | %(levelname)-7s | %(message)s",
+        stream=sys.stdout,
+        force=True,
+    )
 
 
 # ─── CSV Utilities ───────────────────────────────────────────────────────
@@ -84,37 +72,19 @@ def load_seen_ids() -> set[str]:
     return seen
 
 
-# ─── Feed Fetching with Retry ───────────────────────────────────────────
+# ─── Feed Fetching ───────────────────────────────────────────────────────
 
 
 def fetch_feed(url: str) -> feedparser.FeedParserDict:
-    """Fetch and parse an RSS feed, retrying only transient failures."""
-    feed = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        feed = feedparser.parse(url)
-
-        # ponytail: bozo=1 with entries is fine (Himalayas does this), only
-        # retry when bozo=1 AND no entries came back
-        if not feed.bozo or feed.entries:
-            return feed
-
-        exc = getattr(feed, "bozo_exception", None)
+    """Fetch and parse an RSS feed. No retries: the daily run is the retry."""
+    feed = feedparser.parse(url)
+    # ponytail: bozo=1 with entries is fine (Himalayas does this)
+    if feed.bozo and not feed.entries:
         log.warning(
-            "Feed fetch attempt %d/%d for %s: %s",
-            attempt, MAX_RETRIES, url, exc or "unknown error",
+            "Feed fetch failed for %s: %s",
+            url, getattr(feed, "bozo_exception", "unknown error"),
         )
-        # 404s, DNS failures, malformed XML won't improve on retry
-        if not isinstance(exc, _TRANSIENT_ERRORS):
-            log.error("Permanent failure for %s, not retrying", url)
-            return feed
-
-        if attempt < MAX_RETRIES:
-            sleep_time = RETRY_BACKOFF * attempt
-            log.debug("Retrying in %ds...", sleep_time)
-            time.sleep(sleep_time)
-
-    log.error("All %d attempts failed for %s", MAX_RETRIES, url)
-    return feed  # Return last attempt even if bozo
+    return feed
 
 
 # ─── Entry Parsing ───────────────────────────────────────────────────────
@@ -172,16 +142,6 @@ def extract_location(entry, source_label: str) -> str:
     return "Not specified"
 
 
-# ─── Relevance Filtering ────────────────────────────────────────────────
-
-
-def is_relevant(combined_lower: str, title_lower: str) -> bool:
-    """Check if a job matches role keywords and isn't too senior."""
-    return any(kw in combined_lower for kw in ROLE_KEYWORDS) and not any(
-        flag in title_lower for flag in SENIORITY_BLOCK
-    )
-
-
 # ─── Feed Processing ────────────────────────────────────────────────────
 
 
@@ -224,7 +184,10 @@ def process_feed(
             title_lower = title.lower()
             combined_lower = title_lower + " " + description.lower()
 
-            if not is_relevant(combined_lower, title_lower):
+            # relevance: matches a role keyword and isn't too senior
+            if not any(kw in combined_lower for kw in ROLE_KEYWORDS) or any(
+                flag in title_lower for flag in SENIORITY_BLOCK
+            ):
                 continue
 
             results.append({

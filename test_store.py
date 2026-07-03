@@ -1,0 +1,59 @@
+"""Checks on the persistence seam: round-trip, mark_applied, upsert, week cutoff.
+
+Run: python test_store.py
+"""
+
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import store
+
+# the module-global paths are the seam: point them at a tmp dir
+_tmp = Path(tempfile.mkdtemp())
+store.CSV_PATH = _tmp / "jobs.csv"
+store.APPLIED_PATH = _tmp / "applied.csv"
+store.PREP_PATH = _tmp / "prep.csv"
+
+now = datetime.now(timezone.utc)
+JOB = {
+    "id": "j1", "title": "Data Analyst", "company": "Acme", "location": "Remote",
+    "source": "Test", "link": "https://example.com/j1",
+    "published": now.strftime(store.UTC_FMT), "applied": "", "summary": "sql",
+}
+
+# missing file loads as empty; add_jobs appends and round-trips
+assert store.load_jobs() == []
+store.add_jobs([JOB])
+store.add_jobs([{**JOB, "id": "j2"}])
+jobs = store.load_jobs()
+assert [j["id"] for j in jobs] == ["j1", "j2"]
+assert jobs[0]["title"] == "Data Analyst"
+
+# mark_applied: unknown id is a no-op, known id flips the flag and logs once
+assert store.mark_applied("nope") is False
+assert store.mark_applied("j1") is True
+assert next(j for j in store.load_jobs() if j["id"] == "j1")["applied"] == "yes"
+apps = store.load_applications()
+assert len(apps) == 1
+assert apps[0]["job_id"] == "j1" and apps[0]["result"] == "Applied"
+
+# upsert_prep replaces by job_id, appends new ids
+PREP = {"job_id": "j1", "title": "old", "company": "", "link": "",
+        "tailored_bullets": "", "missing_keywords": "", "cover_snippet": ""}
+store.upsert_prep(PREP)
+store.upsert_prep({**PREP, "title": "new"})
+store.upsert_prep({**PREP, "job_id": "j2", "title": "other"})
+prep_rows = store._load(store.PREP_PATH)
+assert [(r["job_id"], r["title"]) for r in prep_rows] == [("j1", "new"), ("j2", "other")]
+
+# this_week keeps recent rows; garbage dates sort as oldest-possible
+rows = [
+    {"d": (now - timedelta(days=1)).strftime(store.DATE_FMT)},
+    {"d": (now - timedelta(days=10)).strftime(store.DATE_FMT)},
+    {"d": "garbage"},
+]
+assert store.this_week(rows, "d") == [rows[0]]
+assert store.parse_date("garbage", store.DATE_FMT) == datetime.min.replace(tzinfo=timezone.utc)
+
+print("OK: test_store passed")

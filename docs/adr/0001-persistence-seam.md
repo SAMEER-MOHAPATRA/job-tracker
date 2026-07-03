@@ -1,6 +1,6 @@
 # ADR-0001: Introduce a persistence seam via store.py
 
-**Status:** Accepted  
+**Status:** Accepted (amended 2026-07-03 — see below)  
 **Date:** 2026-07-02  
 **Deciders:** User + agent
 
@@ -41,3 +41,13 @@ The CSV schema gains a `summary` field to carry the job description from Discove
 
 - **Keep inline CSV** — rejected because the duplication already caused drift (different error handling, different field lists). The deletion test confirmed CSV logic is pure pass-through.
 - **SQLite** — rejected for now. CSV remains human-readable and the schema is simple. `store.py` makes a future switch to SQLite an adapter change.
+
+## Amendment (2026-07-03)
+
+As implemented, `store.py` is plain module functions, not a `JobStore` protocol with
+`CsvJobStore`/`InMemoryJobStore` adapters. One adapter means a hypothetical seam — nothing
+varied, so the protocol was skipped. The seam is the module-global paths
+(`CSV_PATH`, `APPLIED_PATH`, `PREP_PATH`), which are resolved at call time: tests
+(`test_store.py`) reassign them to a tmp dir, delivering this ADR's testability goal
+(no disk I/O in the real cwd, deterministic) without the adapter machinery. A future
+storage switch remains a `store.py`-local change.

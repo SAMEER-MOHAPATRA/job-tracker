@@ -11,3 +11,5 @@ logs/
 jobs_archive.csv
 jobs_found.json
 dashboard.html
+.claude/skills/
+scratchpad/

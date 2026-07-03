@@ -1,7 +1,12 @@
+import re
+import urllib.request
 from collections import Counter
 
 import store
 from config import BULLET_MAP, COVER_TEMPLATE, DEFAULTS, KEYWORD_PATTERN
+from discover import sanitize_html
+
+_SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 
 
 def load_master_resume() -> str:
@@ -31,10 +36,34 @@ def build_cover(job: dict, bullets: list[str]) -> str:
     )
 
 
-def prep_job(job: dict, master_resume: str) -> dict:
+def fetch_jd(link: str) -> str:
+    """Fetch the live job posting and reduce it to plain text."""
+    req = urllib.request.Request(link, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        html = resp.read().decode("utf-8", errors="replace")
+    return sanitize_html(_SCRIPT_RE.sub(" ", html))
+
+
+def prep_one(job: dict, fetch=fetch_jd) -> dict:
+    """Prep a single job on demand: live JD when reachable, stored summary otherwise."""
+    try:
+        jd = fetch(job["link"])
+    except Exception:
+        jd = ""
+    # a thin fetch (login wall, JS-only page) carries less signal than the RSS summary
+    if len(jd) < len(job.get("summary", "")):
+        jd = None
+    row = prep_job(job, load_master_resume(), jd)
+    store.upsert_prep(row)
+    return row
+
+
+def prep_job(job: dict, master_resume: str, jd_text: str | None = None) -> dict:
     # store fields are already sanitized plain text at discovery time
+    if jd_text is None:
+        jd_text = job.get("summary", "")
     bullets, missing = build_bullets(
-        master_resume, f"{job['title']} {job['company']} {job.get('summary', '')}"
+        master_resume, f"{job['title']} {job['company']} {jd_text}"
     )
     return {
         "job_id":           job["id"],

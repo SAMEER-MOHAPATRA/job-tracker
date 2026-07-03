@@ -1,0 +1,80 @@
+"""Checks on the _build_html seam: escaping of feed text and applied-row rendering.
+
+Run: python test_dashboard.py
+"""
+
+from datetime import datetime, timedelta, timezone
+
+import store
+from dashboard import APPLIED_ROUTE, PREP_ROUTE, _build_html, render, score_job
+
+JOBS = [
+    {
+        "id": "evil1",
+        "title": "<script>alert(1)</script> Data Analyst",
+        "source": "RemoteOK",
+        "published": "2026-07-01 10:00 UTC",
+        "link": "https://example.com/job/evil1",
+        "applied": "",
+        "_score": 90,
+    },
+    {
+        "id": "done1",
+        "title": "Business Analyst",
+        "source": "WWR",
+        "published": "2026-06-20 10:00 UTC",
+        "link": "https://example.com/job/done1",
+        "applied": "yes",
+        "_score": 40,
+    },
+]
+
+html = _build_html(
+    total_jobs=2, jobs_week=1, feed_breakdown=[("RemoteOK", 1), ("WWR", 1)],
+    ranked_jobs=JOBS, total_apps=1, apps_week=0,
+)
+
+# untrusted feed title must be escaped, never raw
+assert "<script>alert(1)</script>" not in html
+assert "&lt;script&gt;" in html
+
+# pending job gets an Apply link; applied job gets muted marker + done row
+assert "data-id='evil1'" in html
+assert "data-id='done1'" not in html
+assert "<span class='muted'>Applied</span>" in html
+assert "class=done" in html
+
+# emitted JS uses the same route constants serve.py routes on
+assert f"'{PREP_ROUTE}'" in html and f"'{APPLIED_ROUTE}'" in html
+
+# --- score_job: freshness buckets, title/location match, skill cap ---
+def job_at(days_ago: int, **kw) -> dict:
+    published = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime(store.UTC_FMT)
+    return {"title": "", "summary": "", "location": "", "published": published, **kw}
+
+assert score_job(job_at(0)) == 50
+assert score_job(job_at(2)) == 40
+assert score_job(job_at(5)) == 25
+assert score_job(job_at(10)) == 10
+assert score_job(job_at(20)) == 0
+assert score_job(job_at(20, title="Senior Data Analyst")) == 30
+assert score_job(job_at(20, title="Business Analyst")) == 20
+assert score_job(job_at(20, location="Remote")) == 20
+assert score_job(job_at(20, location="Pune")) == 0  # no location keyword
+assert score_job(job_at(20, summary="sql python power bi tableau excel etl")) == 25  # 6 skills capped
+
+# --- render: higher score first, ties stay newest-first ---
+def full_job(job_id: str, days_ago: int, title: str = "") -> dict:
+    return {**job_at(days_ago, title=title), "id": job_id, "company": "", "source": "",
+            "link": f"https://example.com/{job_id}", "applied": ""}
+
+store.load_jobs = lambda: [
+    full_job("lo_old", 18),
+    full_job("hi", 20, title="Data Analyst"),
+    full_job("lo_new", 16),
+]
+store.load_applications = lambda: []
+page = render()
+assert page.index("data-id='hi'") < page.index("data-id='lo_new'") < page.index("data-id='lo_old'")
+
+print("OK: test_dashboard passed")

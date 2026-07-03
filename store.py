@@ -8,6 +8,8 @@ for _stream in (sys.stdout, sys.stderr):
     if _stream and hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
+# ponytail: these module globals ARE the persistence seam — tests reassign
+# them to a tmp dir (see test_store.py); no protocol/adapters needed
 CSV_PATH = Path("jobs_found.csv")
 APPLIED_PATH = Path("jobs_applied.csv")
 PREP_PATH = Path("application_prep.csv")
@@ -46,14 +48,17 @@ def load_applications() -> list[dict]:
     return _load(APPLIED_PATH)
 
 
-def add_jobs(jobs: list[dict]) -> None:
-    # ponytail: rewrite the whole file so the header always matches
-    # JOBS_FIELDS — appending under a stale header silently misaligns columns
-    rows = load_jobs() + jobs
-    with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=JOBS_FIELDS, extrasaction="ignore")
+def _save(path: Path, fields: list[str], rows: list[dict]) -> None:
+    # ponytail: rewrite the whole file so the header always matches the
+    # schema — appending under a stale header silently misaligns columns
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def add_jobs(jobs: list[dict]) -> None:
+    _save(CSV_PATH, JOBS_FIELDS, load_jobs() + jobs)
 
 
 def mark_applied(job_id: str) -> bool:
@@ -63,10 +68,7 @@ def mark_applied(job_id: str) -> bool:
     if job is None:
         return False
     job["applied"] = "yes"
-    with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=JOBS_FIELDS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(jobs)
+    _save(CSV_PATH, JOBS_FIELDS, jobs)
     apps = load_applications()
     apps.append({
         "job_id": job_id,
@@ -76,27 +78,28 @@ def mark_applied(job_id: str) -> bool:
         "result": "Applied",
         "notes": "",
     })
-    with open(APPLIED_PATH, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=APPLIED_FIELDS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(apps)
+    _save(APPLIED_PATH, APPLIED_FIELDS, apps)
     return True
 
 
 def save_prep_results(rows: list[dict]) -> None:
-    with open(PREP_PATH, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=PREP_FIELDS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    _save(PREP_PATH, PREP_FIELDS, rows)
+
+
+def upsert_prep(row: dict) -> None:
+    """Replace (or append) the prep row for row['job_id']."""
+    rows = [r for r in _load(PREP_PATH) if r.get("job_id") != row["job_id"]]
+    _save(PREP_PATH, PREP_FIELDS, rows + [row])
 
 
 def this_week(rows: list[dict], key: str, fmt: str = DATE_FMT, days: int = 7) -> list[dict]:
     """Filter already-loaded rows to those dated within the last `days`."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    return [r for r in rows if _parse(r.get(key, ""), fmt) > cutoff]
+    return [r for r in rows if parse_date(r.get(key, ""), fmt) > cutoff]
 
 
-def _parse(date_str: str, fmt: str) -> datetime:
+def parse_date(date_str: str, fmt: str) -> datetime:
+    """Parse a stored date; unparseable strings sort as oldest-possible."""
     try:
         return datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
     except (ValueError, TypeError):

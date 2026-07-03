@@ -4,11 +4,11 @@
 
 **Discovery** — RSS feed ingestion, relevance filtering, and deduplication of job listings. Produces `Job` records. Entry point: `discover.py` (`--check` for feed health).
 
-**Preparation** — Cover-letter tailoring for a `Job` by extracting keywords from its description and matching them against a bullet library. Produces `PrepResult` records. Entry point: `prep.py`.
+**Preparation** — Cover-letter tailoring for a `Job` by extracting keywords from its description and matching them against a bullet library. Produces `PrepResult` records. Interface: `prep_one(job)` preps a single job on demand (fetches the live JD from the job link, falling back to the stored summary) and upserts `application_prep.csv`; batch `main()` preps all jobs from stored summaries only. In served mode, clicking Apply on the dashboard routes through `/prep/<id>`, which runs `prep_one` and shows the materials before linking to the posting. Entry point: `prep.py`.
 
 **Tracking** — Logging applications and generating weekly reviews. Produces `Application` records. Entry point: `review.py`.
 
-**Dashboard** — Read-only HTML report aggregating `Job` and `Application` data. Entry point: `dashboard.py`.
+**Dashboard** — Read-only HTML report aggregating `Job` and `Application` data. Interface: `render() -> str` (serve.py serves it live, never writing to disk); `main()` writes `dashboard.html` for the CLI/refresh.bat path only, so the file may be stale while the server runs. Entry point: `dashboard.py`. The serve-mode route contract (`PREP_ROUTE`, `APPLIED_ROUTE`) is defined once in `dashboard.py`; both the emitted JS and `serve.py`'s routing import it.
 
 ## Core entities
 
