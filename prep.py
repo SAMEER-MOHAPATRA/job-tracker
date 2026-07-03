@@ -1,3 +1,5 @@
+from collections import Counter
+
 import store
 from config import BULLET_MAP, COVER_TEMPLATE, DEFAULTS, KEYWORD_PATTERN
 
@@ -8,17 +10,12 @@ def load_master_resume() -> str:
         return f.read().lower()
 
 
-def extract_keywords(text: str) -> list[str]:
-    # dict.fromkeys: dedupe while keeping first-seen order
-    return list(dict.fromkeys(m.group(1).lower() for m in KEYWORD_PATTERN.finditer(text)))
-
-
-def build_bullets(master_resume: str, jd_keywords: list[str]) -> tuple[list[str], list[str]]:
-    missing = [kw for kw in jd_keywords if kw not in master_resume]
-    bullets = [
-        BULLET_MAP.get(kw, f"Applied {kw} skills to solve logistics data challenges")
-        for kw in missing[:len(DEFAULTS)]
-    ]
+def build_bullets(master_resume: str, jd_text: str) -> tuple[list[str], list[str]]:
+    # rank JD keywords by frequency (ties keep first-seen order), pick their bullets
+    counts = Counter(m.group(1).lower() for m in KEYWORD_PATTERN.finditer(jd_text))
+    ranked = [kw for kw, _ in counts.most_common()]
+    missing = [kw for kw in ranked if kw not in master_resume]
+    bullets = list(dict.fromkeys(BULLET_MAP[kw] for kw in ranked))[:len(DEFAULTS)]
     # pad with defaults — the cover template has exactly len(DEFAULTS) slots
     bullets += DEFAULTS[len(bullets):]
     return bullets, missing
@@ -36,10 +33,9 @@ def build_cover(job: dict, bullets: list[str]) -> str:
 
 def prep_job(job: dict, master_resume: str) -> dict:
     # store fields are already sanitized plain text at discovery time
-    jd_keywords = extract_keywords(
-        f"{job['title']} {job['company']} {job.get('summary', '')}"
+    bullets, missing = build_bullets(
+        master_resume, f"{job['title']} {job['company']} {job.get('summary', '')}"
     )
-    bullets, missing = build_bullets(master_resume, jd_keywords)
     return {
         "job_id":           job["id"],
         "title":            job["title"],

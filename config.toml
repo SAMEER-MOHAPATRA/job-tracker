@@ -99,6 +99,17 @@ documentation = "Created user manuals, process flowcharts, and test scenarios th
 "process improvement" = "Led workflow-standardization initiatives that boosted reporting efficiency by 15-20%"
 stakeholder = "Served as primary liaison between technical teams and business users, ensuring rapid issue resolution"
 
+# title-level keywords — RSS summaries are often near-empty, so titles must carry the match
+analyst = "Analyzed 1,000+ monthly logistics records at JSPL, improving data accuracy 10-12% and cutting decision latency from 3 hours to 30 minutes"
+analytics = "Built 8 KPI dashboards (star-schema, DAX) for rail logistics analytics, reducing manual reporting by 50%"
+data = "Engineered Python/Pandas ETL pipeline validating 8+ daily operational records with 95% deduplication accuracy"
+engineer = "Engineered end-to-end Python/Pandas ETL pipeline, eliminating 60% of manual validation work"
+developer = "Automated Excel reporting with VBA, cutting cycle time from 20 to 2 minutes (180-240 hours saved annually)"
+scientist = "Applied Python (Pandas, NumPy) for data cleaning, deduplication, and statistical analysis of logistics records"
+support = "SPOC between operations and software vendor for a 200-user system: reproduced bugs, ran live-call validation, resolved 30+ issues"
+testing = "Executed 25 UAT test cases, surfacing 12 critical inconsistencies before production with 99% sign-off"
+etl = "Engineered Python/Pandas ETL pipeline validating daily operational records at 95% accuracy"
+
 [preparation.cover]
 template = """
 Dear Hiring Manager,
